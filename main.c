@@ -9,12 +9,18 @@ int main() {
         int code = glfwGetError(&description);
         fprintf(stderr, "glfw failed to initialize.\nerror (%d): %s\n", code, description);
     }
-    GLFWwindow* window = glfwCreateWindow(640, 480, "zupa", NULL, NULL);
+    glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
+    GLFWwindow* window = glfwCreateWindow(640, 480, "dev", NULL, NULL);
     glfwMakeContextCurrent(window);
 
     GLenum err; 
     if ((err = glewInit()) != GLEW_OK)
         fprintf(stderr, "glew failed to initialize.\nerror (%u): %s\n", err, glewGetErrorString(err));
 
+    while (!glfwWindowShouldClose(window)) {
+        glfwSwapBuffers(window);
+        glfwPollEvents();
+    }
+    
     glfwTerminate();
 }
