@@ -106,9 +106,14 @@ int main() {
     printf("version: %s\n", glGetString(GL_VERSION));
 
     float vertices[] = {
-        0.0f, 0.5f,
-        0.5f, -0.5f,
-        -0.5f, -0.5f
+        1.0f, 1.0f,
+        1.0f, -1.0f,
+        -1.0f, -1.0f,
+        -1.0f, 1.0f
+    };
+
+    unsigned int indices[] = {
+        0, 1, 2, 2, 3, 0
     };
     
     unsigned int vbo;
@@ -123,12 +128,17 @@ int main() {
     glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(float), (void*)0);
     glEnableVertexAttribArray(0);
 
+    unsigned int ebo;
+    glGenBuffers(1, &ebo);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ebo);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), indices, GL_STATIC_DRAW);
+
     compile_shaders("vert.glsl", "frag.glsl");
     
     while (!glfwWindowShouldClose(window)) {
         glClear(GL_COLOR_BUFFER_BIT);
 
-        glDrawArrays(GL_TRIANGLES, 0, 3);
+        glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
 
         glfwSwapBuffers(window);
         glfwPollEvents();
