@@ -1,6 +1,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <errno.h>
+#include <assert.h>
 #include <string.h>
 #include <GL/glew.h>
 #include <GLFW/glfw3.h>
@@ -142,10 +143,17 @@ int main() {
         fprintf(stderr, "glfw failed to initialize.\nerror (%d): %s\n", code, description);
         exit(EXIT_FAILURE);
     }
-    const unsigned int w = 640, h = 480;
+
+    const unsigned int w = 600, h = 600;
+
     glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
     GLFWwindow* window = glfwCreateWindow(w, h, "dev", NULL, NULL);
     glfwMakeContextCurrent(window);
+
+    int max_texture_size;
+    glGetIntegerv(GL_MAX_TEXTURE_SIZE, &max_texture_size);
+    printf("max texture size: %d\n", max_texture_size);
+    assert(w <= max_texture_size && h <= max_texture_size);
 
     GLenum err; 
     if ((err = glewInit()) != GLEW_OK) {
@@ -187,7 +195,6 @@ int main() {
     glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), indices, GL_STATIC_DRAW);
 
     unsigned char *texture_data = malloc(w * h);
-    memset(texture_data, 128, w * h);
     
     unsigned int texture;
     glGenTextures(1, &texture);
@@ -195,7 +202,8 @@ int main() {
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, texture);
 
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RED, w, h, 0, GL_RED, GL_UNSIGNED_BYTE, texture_data);
 
     glBindImageTexture(0, texture, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_R8UI);
@@ -203,8 +211,9 @@ int main() {
     unsigned int compute_prog = compile_compute_shader("genset.glsl");
     
     unsigned int render_prog = compile_render_shaders("vert.glsl", "frag.glsl");
-    glUseProgram(render_prog);
     
+    assert(!glGetError());
+
     while (!glfwWindowShouldClose(window)) {
         glClear(GL_COLOR_BUFFER_BIT);
 
