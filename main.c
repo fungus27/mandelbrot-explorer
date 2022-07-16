@@ -135,6 +135,40 @@ unsigned int compile_compute_shader(const char* filepath) {
     return prog;
 }
 
+static double mag = 1.0;
+static double x_offset = 0.0, y_offset = 0.0;
+static char regen_set = 1;
+
+void scroll_callback(GLFWwindow *window, double xoffset, double yoffset) {
+    if (yoffset > 0.0f)
+        mag *= 1.1;
+    else
+        mag *= 1.0/1.1;
+    regen_set = 1;
+}
+
+void key_callback(GLFWwindow* window, int key, int scancode, int action, int mods) {
+    if (action == GLFW_PRESS) {
+        switch (key) {
+            case GLFW_KEY_W:
+                y_offset += 0.1f/mag;
+                break;
+            case GLFW_KEY_A:
+                x_offset -= 0.1f/mag;
+                break;
+            case GLFW_KEY_S:
+                y_offset -= 0.1f/mag;
+                break;
+            case GLFW_KEY_D:
+                x_offset += 0.1f/mag;
+                break;
+            case GLFW_KEY_P:
+                printf("mag: %f, offset: (%f, %f).\n", mag, x_offset, y_offset);
+                break;
+        }
+        regen_set = 1;
+    }
+}
 
 int main() {
     if (!glfwInit()) {
@@ -149,6 +183,8 @@ int main() {
     glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
     GLFWwindow* window = glfwCreateWindow(w, h, "dev", NULL, NULL);
     glfwMakeContextCurrent(window);
+    glfwSetScrollCallback(window, scroll_callback);
+    glfwSetKeyCallback(window, key_callback);
 
     int max_texture_size;
     glGetIntegerv(GL_MAX_TEXTURE_SIZE, &max_texture_size);
@@ -211,14 +247,25 @@ int main() {
     unsigned int compute_prog = compile_compute_shader("genset.glsl");
     
     unsigned int render_prog = compile_render_shaders("vert.glsl", "frag.glsl");
+    const unsigned int work_group_size = 30;
     
+    glUseProgram(compute_prog);
+    glUniform2d(glGetUniformLocation(compute_prog, "bottom_left"), -1.0, -1.0);
+    glUniform2d(glGetUniformLocation(compute_prog, "upper_right"), 1.0, 1.0);
+    glUniform1f(glGetUniformLocation(compute_prog, "max_iters"), 1000.0f);
+
     assert(!glGetError());
 
     while (!glfwWindowShouldClose(window)) {
         glClear(GL_COLOR_BUFFER_BIT);
 
-        glUseProgram(compute_prog);
-        glDispatchCompute(w, h, 1);
+        if (regen_set) {
+            glUseProgram(compute_prog);
+            glUniform1d(glGetUniformLocation(compute_prog, "mag"), mag);
+            glUniform2d(glGetUniformLocation(compute_prog, "offset"), x_offset, y_offset);
+            glDispatchCompute(w / work_group_size, h / work_group_size, 1);
+            regen_set = 0;
+        }
 
         glUseProgram(render_prog);
         glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
