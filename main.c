@@ -198,6 +198,8 @@ int main() {
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RED, w, h, 0, GL_RED, GL_UNSIGNED_BYTE, texture_data);
 
+    glBindImageTexture(0, texture, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_R8UI);
+
     unsigned int compute_prog = compile_compute_shader("genset.glsl");
     
     unsigned int render_prog = compile_render_shaders("vert.glsl", "frag.glsl");
@@ -206,6 +208,10 @@ int main() {
     while (!glfwWindowShouldClose(window)) {
         glClear(GL_COLOR_BUFFER_BIT);
 
+        glUseProgram(compute_prog);
+        glDispatchCompute(w, h, 1);
+
+        glUseProgram(render_prog);
         glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
 
         glfwSwapBuffers(window);
