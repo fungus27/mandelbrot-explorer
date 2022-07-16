@@ -5,7 +5,7 @@
 #include <GL/glew.h>
 #include <GLFW/glfw3.h>
 
-unsigned int compile_shaders(const char *vert_filepath, const char *frag_filepath) {
+unsigned int compile_render_shaders(const char *vert_filepath, const char *frag_filepath) {
     FILE *vert_file = fopen(vert_filepath, "r");
     if (!vert_file) {
         int error = errno;
@@ -74,17 +74,66 @@ unsigned int compile_shaders(const char *vert_filepath, const char *frag_filepat
     glGetProgramiv(prog, GL_LINK_STATUS, &success);
     if(!success) {
         glGetProgramInfoLog(prog, 512, NULL, infoLog);
-        fprintf(stderr, "shader program failed to link.\nerror: %s\n", infoLog);
+        fprintf(stderr, "render shader program failed to link.\nerror: %s\n", infoLog);
         exit(EXIT_FAILURE);
     }
 
     glDeleteShader(vert);
     glDeleteShader(frag);
 
-    glUseProgram(prog);
+    return prog;
+}
+
+unsigned int compile_compute_shader(const char* filepath) {
+    FILE *file = fopen(filepath, "r");
+    if (!file) {
+        int error = errno;
+        fprintf(stderr, "unable to load compute shader at '%s'.\nerror: %s", filepath, strerror(error));
+        exit(EXIT_FAILURE);
+    }
+
+    fseek(file, 0, SEEK_END);
+    unsigned int size = ftell(file);
+    fseek(file, 0, SEEK_SET);
+
+    char *content = malloc(size + 1);
+    fread(content, size, 1, file);
+    content[size] = 0;
+
+    unsigned int shader = glCreateShader(GL_COMPUTE_SHADER);
+    glShaderSource(shader, 1, (const char**)&content, NULL);
+    glCompileShader(shader);
+
+    int success;
+    char infoLog[512];
+    glGetShaderiv(shader, GL_COMPILE_STATUS, &success);
+
+    if (!success) {
+        glGetShaderInfoLog(shader, 512, NULL, infoLog);
+        fprintf(stderr, "compute shader failed to compile.\nerror: %s\n", infoLog);
+        exit(EXIT_FAILURE);
+    }
+
+    free(content);
+
+    unsigned int prog = glCreateProgram();
+
+    glAttachShader(prog, shader);
+
+    glLinkProgram(prog);
+    
+    glGetProgramiv(prog, GL_LINK_STATUS, &success);
+    if(!success) {
+        glGetProgramInfoLog(prog, 512, NULL, infoLog);
+        fprintf(stderr, "compute shader program failed to link.\nerror: %s\n", infoLog);
+        exit(EXIT_FAILURE);
+    }
+
+    glDeleteShader(shader);
 
     return prog;
 }
+
 
 int main() {
     if (!glfwInit()) {
@@ -93,8 +142,9 @@ int main() {
         fprintf(stderr, "glfw failed to initialize.\nerror (%d): %s\n", code, description);
         exit(EXIT_FAILURE);
     }
+    const unsigned int w = 640, h = 480;
     glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
-    GLFWwindow* window = glfwCreateWindow(640, 480, "dev", NULL, NULL);
+    GLFWwindow* window = glfwCreateWindow(w, h, "dev", NULL, NULL);
     glfwMakeContextCurrent(window);
 
     GLenum err; 
@@ -106,10 +156,10 @@ int main() {
     printf("version: %s\n", glGetString(GL_VERSION));
 
     float vertices[] = {
-        1.0f, 1.0f,
-        1.0f, -1.0f,
-        -1.0f, -1.0f,
-        -1.0f, 1.0f
+        1.0f, 1.0f, 1.0f, 1.0f,
+        1.0f, -1.0f, 1.0f, 0.0f,
+        -1.0f, -1.0f, 0.0f, 0.0f,
+        -1.0f, 1.0f, 0.0f, 1.0f
     };
 
     unsigned int indices[] = {
@@ -125,15 +175,33 @@ int main() {
     glGenVertexArrays(1, &vao);
     glBindVertexArray(vao);
 
-    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(float), (void*)0);
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)0);
     glEnableVertexAttribArray(0);
+
+    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)(2 * sizeof(float)));
+    glEnableVertexAttribArray(1);
 
     unsigned int ebo;
     glGenBuffers(1, &ebo);
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ebo);
     glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), indices, GL_STATIC_DRAW);
 
-    compile_shaders("vert.glsl", "frag.glsl");
+    unsigned char *texture_data = malloc(w * h);
+    memset(texture_data, 128, w * h);
+    
+    unsigned int texture;
+    glGenTextures(1, &texture);
+
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, texture);
+
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RED, w, h, 0, GL_RED, GL_UNSIGNED_BYTE, texture_data);
+
+    unsigned int compute_prog = compile_compute_shader("genset.glsl");
+    
+    unsigned int render_prog = compile_render_shaders("vert.glsl", "frag.glsl");
+    glUseProgram(render_prog);
     
     while (!glfwWindowShouldClose(window)) {
         glClear(GL_COLOR_BUFFER_BIT);
@@ -144,5 +212,6 @@ int main() {
         glfwPollEvents();
     }
     
+    free(texture_data);
     glfwTerminate();
 }
