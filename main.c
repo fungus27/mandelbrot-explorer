@@ -3,6 +3,7 @@
 #include <errno.h>
 #include <assert.h>
 #include <string.h>
+#include <math.h>
 #include <GL/glew.h>
 #include <GLFW/glfw3.h>
 
@@ -170,6 +171,41 @@ void key_callback(GLFWwindow* window, int key, int scancode, int action, int mod
     }
 }
 
+typedef struct {
+    float r;
+    float g;
+    float b;
+} color;
+
+typedef struct {
+    color color;
+    float s;
+    unsigned int pos;
+} interval;
+
+color c_lerp(color a, color b, float t) {
+    color res = {(1 - t) * a.r + t * b.r, (1 - t) * a.g + t * b.g, (1 - t) * a.b + t * b.b};
+    return res;
+}
+
+void gen_hue(color start_color, unsigned int int_count, interval *intervals, unsigned int col_count, color *hue) {
+    if (!int_count) {
+        for (unsigned int i = 0; i < col_count; ++i)
+            hue[i] = start_color;
+        return;
+    }
+
+    unsigned int last_pos = 0;
+    for (unsigned int i = 0; i < int_count; ++i) {
+        color s_color = i > 0 ? intervals[i - 1].color : start_color;
+        for (unsigned int j = 0; j <= intervals[i].pos - last_pos; ++j) {
+            float t = pow((float)j/(intervals[i].pos - last_pos), intervals[i].s);
+            hue[j + last_pos] = c_lerp(s_color, intervals[i].color, t);
+        }
+        last_pos = intervals[i].pos + 1;
+    }
+}
+
 int main() {
     if (!glfwInit()) {
         const char *description;
@@ -209,6 +245,20 @@ int main() {
     unsigned int indices[] = {
         0, 1, 2, 2, 3, 0
     };
+
+    color hue[256];
+    for (unsigned int i = 0; i < 256; ++i) {
+        hue[i].r = i/255.0f;
+        hue[i].g = 0.0f;
+        hue[i].b = 0.0f;
+    }
+    
+    color start_color = {0.0f, 0.0f, 0.25f};
+    interval intervals[] = {
+        { {0.9f, 0.0f, 0.0f}, 1.26f, 128 },
+        { {0.0f, 0.0f, 0.0f}, 0.9f, 255 },
+    };
+    gen_hue(start_color, sizeof(intervals)/sizeof(interval), intervals, 256, hue);
     
     unsigned int vbo;
     glGenBuffers(1, &vbo);
@@ -247,8 +297,10 @@ int main() {
     unsigned int compute_prog = compile_compute_shader("genset.glsl");
     
     unsigned int render_prog = compile_render_shaders("vert.glsl", "frag.glsl");
+    glUseProgram(render_prog);
+    glUniform3fv(glGetUniformLocation(render_prog, "hue"), 256, (float*)hue);
+
     const unsigned int work_group_size = 30;
-    
     glUseProgram(compute_prog);
     glUniform2d(glGetUniformLocation(compute_prog, "bottom_left"), -1.0, -1.0);
     glUniform2d(glGetUniformLocation(compute_prog, "upper_right"), 1.0, 1.0);
