@@ -152,10 +152,85 @@ typedef struct {
     unsigned char pos;
 } interval;
 
+typedef struct {
+    double x;
+    double y;
+} dd;
+
+// double precision functions
+dd dd_set(double d) {
+    dd t = {d, 0.0};
+    return t;
+}
+
+dd dd_split64(double d)
+{
+    const double SPLITTER = (1 << 29) + 1;
+    double t = d * SPLITTER;
+    dd result;
+    result.x = t - (t - d);
+    result.y = d - result.x;
+
+    return result;
+}
+
+dd dd_quick_two_sum(double a, double b)
+{
+    dd temp;
+    temp.x = a + b;
+    temp.y = b - (temp.x - a);
+    return temp;
+}
+
+dd dd_two_prod(double a, double b) {
+    dd p;
+    p.x = a * b;
+    dd aS = dd_split64(a);
+    dd bS = dd_split64(b);
+    p.y = (aS.x * bS.x - p.x) + aS.x * bS.y + aS.y * bS.x + aS.y * bS.y;
+    return p;
+}
+
+dd dd_add(dd dsa, dd dsb)
+{
+    dd dsc;
+    double t1, t2, e;
+
+    t1 = dsa.x + dsb.x;
+    e = t1 - dsa.x;
+    t2 = ((dsb.x - e) + (dsa.x - (t1 - e))) + dsa.y + dsb.y;
+
+    dsc.x = t1 + t2;
+    dsc.y = t2 - (dsc.x - t1);
+    return dsc;
+}
+
+dd dd_mul(dd a, dd b)
+{
+    dd p;
+
+    p = dd_two_prod(a.x, b.x);
+    p.y += a.x * b.y + a.y * b.x;
+    p = dd_quick_two_sum(p.x, p.y);
+    return p;
+}
+
+dd dd_div(dd b, dd a) {
+    double xn = 1.0 / a.x;
+    dd yn = {b.x * xn, 0.0};
+    dd a_yn = dd_mul(a, yn);
+    a_yn.x = -a_yn.x;
+    a_yn.y = -a_yn.y;
+
+    double diff = (dd_add(b, a_yn)).x;
+    dd prod = dd_two_prod(xn, diff);
+    return dd_add(yn, prod);
+}
+
 enum input_mode { MOVE, HUE };
 
-static double mag = 1.0;
-static double x_offset = 0.0, y_offset = 0.0;
+static dd mag = {0.5, 0.0};
+static dd x_offset = {-.5, 0.0}, y_offset = {-.5, 0.0};
 static char regen_set = 1;
 
 static int current_mode = MOVE;
@@ -176,9 +251,9 @@ static interval intervals[MAX_INTERVAL_COUNT] = {
 
 void scroll_callback(GLFWwindow *window, double xoffset, double yoffset) {
     if (yoffset > 0.0f)
-        mag *= 1.1;
+        mag = dd_mul(mag, dd_set(1.1));
     else
-        mag *= 1.0/1.1;
+        mag = dd_mul(mag, dd_set(1.0/1.1));
     regen_set = 1;
 }
 
@@ -238,19 +313,19 @@ void key_callback(GLFWwindow* window, int key, int scancode, int action, int mod
         if (current_mode == MOVE) {
             switch (key) {
                 case GLFW_KEY_W:
-                    y_offset += 0.1f/mag;
+                    y_offset = dd_add(y_offset, dd_div(dd_set(0.1), mag));
                     break;
                 case GLFW_KEY_A:
-                    x_offset -= 0.1f/mag;
+                    x_offset = dd_add(x_offset, dd_div(dd_set(-0.1), mag));
                     break;
                 case GLFW_KEY_S:
-                    y_offset -= 0.1f/mag;
+                    y_offset = dd_add(y_offset, dd_div(dd_set(-0.1), mag));
                     break;
                 case GLFW_KEY_D:
-                    x_offset += 0.1f/mag;
+                    x_offset = dd_add(x_offset, dd_div(dd_set(0.1), mag));
                     break;
                 case GLFW_KEY_P:
-                    printf("mag: %f, offset: (%f, %f).\n", mag, x_offset, y_offset);
+                    printf("mag: %f, offset: (%f, %f).\n", mag.x, x_offset.x, y_offset.x);
                     break;
             }
             regen_set = 1;
@@ -394,22 +469,23 @@ int main() {
     glUseProgram(compute_prog);
     glUniform2d(glGetUniformLocation(compute_prog, "bottom_left"), -1.0, -1.0);
     glUniform2d(glGetUniformLocation(compute_prog, "upper_right"), 1.0, 1.0);
-    glUniform1f(glGetUniformLocation(compute_prog, "max_iters"), 1000.0f);
-
-    assert(!glGetError());
+    glUniform1f(glGetUniformLocation(compute_prog, "max_iters"), 3000.0f);
 
     char command[MAX_COMMAND_SIZE + 1];
 
     pthread_t thread_id;
     pthread_create(&thread_id, NULL, get_commands, (void*)command);
 
+    assert(!glGetError());
+
     while (!glfwWindowShouldClose(window)) {
         glClear(GL_COLOR_BUFFER_BIT);
 
         if (regen_set) {
             glUseProgram(compute_prog);
-            glUniform1d(glGetUniformLocation(compute_prog, "mag"), mag);
-            glUniform2d(glGetUniformLocation(compute_prog, "offset"), x_offset, y_offset);
+            glUniform2d(glGetUniformLocation(compute_prog, "mag"), mag.x, mag.y);
+            glUniform2d(glGetUniformLocation(compute_prog, "offsetx"), x_offset.x, x_offset.y);
+            glUniform2d(glGetUniformLocation(compute_prog, "offsety"), y_offset.x, y_offset.y);
             glDispatchCompute(w / work_group_size, h / work_group_size, 1);
             regen_set = 0;
         }
@@ -429,7 +505,6 @@ int main() {
         glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
         
         if (command[0] != 0) {
-            // TODO: fix segfaults
             char *first_tok = strtok(command, " ");
             if (!strcmp(first_tok, "set_int_pos")) {
                 sscanf(strtok(NULL, " "), "%hhu", &intervals[selected_interval].pos);
