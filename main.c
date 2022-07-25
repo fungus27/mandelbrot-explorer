@@ -1,4 +1,5 @@
 #include <stdlib.h>
+#include <pthread.h>
 #include <stdio.h>
 #include <errno.h>
 #include <assert.h>
@@ -6,6 +7,9 @@
 #include <math.h>
 #include <GL/glew.h>
 #include <GLFW/glfw3.h>
+
+#define MAX_COMMAND_SIZE 512
+#define MAX_INTERVAL_COUNT 100
 
 unsigned int compile_render_shaders(const char *vert_filepath, const char *frag_filepath) {
     FILE *vert_file = fopen(vert_filepath, "r");
@@ -136,41 +140,6 @@ unsigned int compile_compute_shader(const char* filepath) {
     return prog;
 }
 
-static double mag = 1.0;
-static double x_offset = 0.0, y_offset = 0.0;
-static char regen_set = 1;
-
-void scroll_callback(GLFWwindow *window, double xoffset, double yoffset) {
-    if (yoffset > 0.0f)
-        mag *= 1.1;
-    else
-        mag *= 1.0/1.1;
-    regen_set = 1;
-}
-
-void key_callback(GLFWwindow* window, int key, int scancode, int action, int mods) {
-    if (action == GLFW_PRESS) {
-        switch (key) {
-            case GLFW_KEY_W:
-                y_offset += 0.1f/mag;
-                break;
-            case GLFW_KEY_A:
-                x_offset -= 0.1f/mag;
-                break;
-            case GLFW_KEY_S:
-                y_offset -= 0.1f/mag;
-                break;
-            case GLFW_KEY_D:
-                x_offset += 0.1f/mag;
-                break;
-            case GLFW_KEY_P:
-                printf("mag: %f, offset: (%f, %f).\n", mag, x_offset, y_offset);
-                break;
-        }
-        regen_set = 1;
-    }
-}
-
 typedef struct {
     float r;
     float g;
@@ -180,8 +149,48 @@ typedef struct {
 typedef struct {
     color color;
     float s;
-    unsigned int pos;
+    unsigned char pos;
 } interval;
+
+enum input_mode { MOVE, HUE };
+
+static double mag = 1.0;
+static double x_offset = 0.0, y_offset = 0.0;
+static char regen_set = 1;
+
+static int current_mode = MOVE;
+static char change_mode = 1;
+
+static color hue[256];
+static char change_hue = 1;
+    
+static color start_color = {0.0f, 0.0f, 0.25f};
+static unsigned int interval_count = 0;
+static unsigned int selected_interval = 0;
+static interval intervals[MAX_INTERVAL_COUNT];
+
+void scroll_callback(GLFWwindow *window, double xoffset, double yoffset) {
+    if (yoffset > 0.0f)
+        mag *= 1.1;
+    else
+        mag *= 1.0/1.1;
+    regen_set = 1;
+}
+
+void *get_commands(void *arg) {
+    char *t_command = (char*)arg;
+    while (1) {
+        int c, i = 0;
+        while ((c = getchar()) != '\n' && c != EOF && i < MAX_COMMAND_SIZE) {
+            if (i > 0 && t_command[i-1] == ' ' && c == ' ')
+                continue;
+            t_command[i] = c;
+            ++i;
+        }
+        t_command[i] = 0;
+    }
+    return NULL;
+}
 
 color c_lerp(color a, color b, float t) {
     color res = {(1 - t) * a.r + t * b.r, (1 - t) * a.g + t * b.g, (1 - t) * a.b + t * b.b};
@@ -189,20 +198,110 @@ color c_lerp(color a, color b, float t) {
 }
 
 void gen_hue(color start_color, unsigned int int_count, interval *intervals, unsigned int col_count, color *hue) {
-    if (!int_count) {
-        for (unsigned int i = 0; i < col_count; ++i)
-            hue[i] = start_color;
-        return;
-    }
+    for (unsigned int i = 0; i < col_count; ++i)
+        hue[i] = start_color;
 
-    unsigned int last_pos = 0;
+    if (!int_count)
+        return;
+
+    unsigned char last_pos = 0;
     for (unsigned int i = 0; i < int_count; ++i) {
         color s_color = i > 0 ? intervals[i - 1].color : start_color;
-        for (unsigned int j = 0; j <= intervals[i].pos - last_pos; ++j) {
-            float t = pow((float)j/(intervals[i].pos - last_pos), intervals[i].s);
+        unsigned int range = (intervals[i].pos - last_pos) > 0 ? intervals[i].pos - last_pos : 0;
+        for (unsigned int j = 0; j <= range; ++j) {
+            float t = pow((float)j/range, intervals[i].s);
             hue[j + last_pos] = c_lerp(s_color, intervals[i].color, t);
         }
         last_pos = intervals[i].pos + 1;
+    }
+}
+
+// TODO: do continous input (holding down keys)
+void key_callback(GLFWwindow* window, int key, int scancode, int action, int mods) {
+    if (action == GLFW_PRESS) {
+
+        // mode changing
+        switch (key) {
+            case GLFW_KEY_H:
+                current_mode = current_mode == MOVE ? HUE : MOVE;
+                printf("changed mode to %s.\n", current_mode == MOVE ? "MOVE" : "HUE");
+                change_mode = 1;
+                break;
+        }
+
+        // modes
+        if (current_mode == MOVE) {
+            switch (key) {
+                case GLFW_KEY_W:
+                    y_offset += 0.1f/mag;
+                    break;
+                case GLFW_KEY_A:
+                    x_offset -= 0.1f/mag;
+                    break;
+                case GLFW_KEY_S:
+                    y_offset -= 0.1f/mag;
+                    break;
+                case GLFW_KEY_D:
+                    x_offset += 0.1f/mag;
+                    break;
+                case GLFW_KEY_P:
+                    printf("mag: %f, offset: (%f, %f).\n", mag, x_offset, y_offset);
+                    break;
+            }
+            regen_set = 1;
+        }
+        else if (current_mode == HUE) {
+            switch (key) {
+                case GLFW_KEY_W:
+                    intervals[selected_interval].s += 0.1f;
+                    gen_hue(start_color, interval_count, intervals, 256, hue);
+                    break;
+                case GLFW_KEY_A:
+                    intervals[selected_interval].pos--;
+                    while (selected_interval > 0 && intervals[selected_interval].pos <= intervals[selected_interval - 1].pos) {
+                        interval t = intervals[selected_interval];
+                        intervals[selected_interval] = intervals[selected_interval - 1];
+                        intervals[selected_interval - 1] = t;
+                        selected_interval--;
+                    }
+                    gen_hue(start_color, interval_count, intervals, 256, hue);
+                    break;
+                case GLFW_KEY_S:
+                    intervals[selected_interval].s -= 0.1f;
+                    gen_hue(start_color, interval_count, intervals, 256, hue);
+                    break;
+                case GLFW_KEY_D:
+                    intervals[selected_interval].pos++;
+                    while (selected_interval < interval_count - 1 && intervals[selected_interval].pos > intervals[selected_interval + 1].pos) {
+                        interval t = intervals[selected_interval];
+                        intervals[selected_interval] = intervals[selected_interval + 1];
+                        intervals[selected_interval + 1] = t;
+                        selected_interval++;
+                    }
+                    gen_hue(start_color, interval_count, intervals, 256, hue);
+                    break;
+                case GLFW_KEY_C:
+                    if (interval_count + 1 > MAX_INTERVAL_COUNT) {
+                        printf("reached max interval count (%u).\n", MAX_INTERVAL_COUNT);
+                        break;
+                    }
+                    for (unsigned int i = interval_count; i > 0; --i)
+                        intervals[i] = intervals[i - 1];
+                    interval t = {{0.0f, 0.0f, 0.0f}, 1.0f, 0};
+                    intervals[0] = t;
+                    selected_interval = 0;
+                    interval_count++;
+                    for (unsigned int i = 0; i < interval_count; ++i) {
+                        printf("%c%u -> { {%f, %f, %f} , %f , %u}\n", i == selected_interval ? '*' : ' ', i, intervals[i].color.r, intervals[i].color.g, intervals[i].color.b, intervals[i].s, intervals[i].pos);
+                    }
+                    gen_hue(start_color, interval_count, intervals, 256, hue);
+                    printf("created new interval.\n");
+                    break;
+            }
+            change_hue = 1;
+            //printf("selected interval: {{%f, %f, %f}, %f, %u}\n", intervals[selected_interval].color.r, intervals[selected_interval].color.g, intervals[selected_interval].color.b, intervals[selected_interval].s, intervals[selected_interval].pos);
+        }
+
     }
 }
 
@@ -224,7 +323,6 @@ int main() {
 
     int max_texture_size;
     glGetIntegerv(GL_MAX_TEXTURE_SIZE, &max_texture_size);
-    printf("max texture size: %d\n", max_texture_size);
     assert(w <= max_texture_size && h <= max_texture_size);
 
     GLenum err; 
@@ -246,19 +344,7 @@ int main() {
         0, 1, 2, 2, 3, 0
     };
 
-    color hue[256];
-    for (unsigned int i = 0; i < 256; ++i) {
-        hue[i].r = i/255.0f;
-        hue[i].g = 0.0f;
-        hue[i].b = 0.0f;
-    }
-    
-    color start_color = {0.0f, 0.0f, 0.25f};
-    interval intervals[] = {
-        { {0.9f, 0.0f, 0.0f}, 1.26f, 128 },
-        { {0.0f, 0.0f, 0.0f}, 0.9f, 255 },
-    };
-    gen_hue(start_color, sizeof(intervals)/sizeof(interval), intervals, 256, hue);
+    gen_hue(start_color, interval_count, intervals, 256, hue);
     
     unsigned int vbo;
     glGenBuffers(1, &vbo);
@@ -298,7 +384,6 @@ int main() {
     
     unsigned int render_prog = compile_render_shaders("vert.glsl", "frag.glsl");
     glUseProgram(render_prog);
-    glUniform3fv(glGetUniformLocation(render_prog, "hue"), 256, (float*)hue);
 
     const unsigned int work_group_size = 30;
     glUseProgram(compute_prog);
@@ -307,6 +392,11 @@ int main() {
     glUniform1f(glGetUniformLocation(compute_prog, "max_iters"), 1000.0f);
 
     assert(!glGetError());
+
+    char command[MAX_COMMAND_SIZE + 1];
+
+    pthread_t thread_id;
+    pthread_create(&thread_id, NULL, get_commands, (void*)command);
 
     while (!glfwWindowShouldClose(window)) {
         glClear(GL_COLOR_BUFFER_BIT);
@@ -319,8 +409,47 @@ int main() {
             regen_set = 0;
         }
 
+        
         glUseProgram(render_prog);
+
+        if (change_mode) {
+            glUniform1i(glGetUniformLocation(render_prog, "current_mode"), current_mode);
+            change_mode = 0;
+        }
+
+        if (change_hue) {
+            glUniform3fv(glGetUniformLocation(render_prog, "hue"), 256, (float*)hue);
+            change_hue = 0;
+        }
         glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
+        
+        if (command[0] != 0) {
+            // TODO: add more commands (set_start_col, set_int_s)
+            // TODO: fix segfaults
+            char *first_tok = strtok(command, " ");
+            if (!strcmp(first_tok, "set_int_pos")) {
+                sscanf(strtok(NULL, " "), "%hhu", &intervals[selected_interval].pos);
+                printf("position set.\n");
+                gen_hue(start_color, interval_count, intervals, 256, hue);
+                change_hue = 1;
+            }
+            else if (!strcmp(first_tok, "set_int_col")) {
+                sscanf(strtok(NULL, " "), "{%f,%f,%f}", &intervals[selected_interval].color.r, &intervals[selected_interval].color.g, &intervals[selected_interval].color.b);
+                printf("color set.\n");
+                gen_hue(start_color, interval_count, intervals, 256, hue);
+                change_hue = 1;
+            }
+            else if (!strcmp(first_tok, "set_int_sel")) {
+                sscanf(strtok(NULL, " "), "%u", &selected_interval);
+                printf("selected interval set.\n");
+            }
+            else if (!strcmp(first_tok, "la_int")) {
+                for (unsigned int i = 0; i < interval_count; ++i) {
+                    printf("%c%u -> { {%f, %f, %f} , %f , %u}\n", i == selected_interval ? '*' : ' ', i, intervals[i].color.r, intervals[i].color.g, intervals[i].color.b, intervals[i].s, intervals[i].pos);
+                }
+            }
+            command[0] = 0;
+        }
 
         glfwSwapBuffers(window);
         glfwPollEvents();

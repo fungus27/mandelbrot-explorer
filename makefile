@@ -1,5 +1,5 @@
 CC = gcc
-LDFLAGS := -lm -lGL -lglfw -lGLEW
+LDFLAGS := -lm -lpthread -lGL -lglfw -lGLEW
 main: main.o
 
 clean:
