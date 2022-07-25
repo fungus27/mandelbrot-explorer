@@ -165,9 +165,14 @@ static color hue[256];
 static char change_hue = 1;
     
 static color start_color = {0.0f, 0.0f, 0.25f};
-static unsigned int interval_count = 0;
 static unsigned int selected_interval = 0;
-static interval intervals[MAX_INTERVAL_COUNT];
+static unsigned int interval_count = 4;
+static interval intervals[MAX_INTERVAL_COUNT] = {
+        { {0.129000f, 0.921000f, 0.415000f} , 0.700000f , 89},
+        { {0.882000f, 0.917000f, 0.125000f} , 4.699998f , 149},
+        { {0.701000f, 0.094000f, 0.094000f} , 3.899998f , 217},
+        { {0.000000f, 0.000000f, 0.000000f} , 2.400000f , 255},
+};
 
 void scroll_callback(GLFWwindow *window, double xoffset, double yoffset) {
     if (yoffset > 0.0f)
@@ -424,7 +429,6 @@ int main() {
         glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
         
         if (command[0] != 0) {
-            // TODO: add more commands (set_start_col, set_int_s)
             // TODO: fix segfaults
             char *first_tok = strtok(command, " ");
             if (!strcmp(first_tok, "set_int_pos")) {
@@ -439,15 +443,35 @@ int main() {
                 gen_hue(start_color, interval_count, intervals, 256, hue);
                 change_hue = 1;
             }
+            else if (!strcmp(first_tok, "set_int_s")) {
+                sscanf(strtok(NULL, " "), "%f", &intervals[selected_interval].s);
+                printf("s set.\n");
+                gen_hue(start_color, interval_count, intervals, 256, hue);
+                change_hue = 1;
+            }
             else if (!strcmp(first_tok, "set_int_sel")) {
                 sscanf(strtok(NULL, " "), "%u", &selected_interval);
                 printf("selected interval set.\n");
+            }
+            else if (!strcmp(first_tok, "set_start_col")) {
+                sscanf(strtok(NULL, " "), "{%f,%f,%f}", &start_color.r, &start_color.g, &start_color.b);
+                printf("start color set.\n");
+                gen_hue(start_color, interval_count, intervals, 256, hue);
+                change_hue = 1;
             }
             else if (!strcmp(first_tok, "la_int")) {
                 for (unsigned int i = 0; i < interval_count; ++i) {
                     printf("%c%u -> { {%f, %f, %f} , %f , %u}\n", i == selected_interval ? '*' : ' ', i, intervals[i].color.r, intervals[i].color.g, intervals[i].color.b, intervals[i].s, intervals[i].pos);
                 }
             }
+            else if (!strcmp(first_tok, "dump_int")) {
+                printf("static unsigned int interval_count = %u;\nstatic interval intervals[MAX_INTERVAL_COUNT] = {\n", interval_count);
+                for (unsigned int i = 0; i < interval_count; ++i) {
+                    printf("\t{ {%ff, %ff, %ff} , %ff , %u},\n", intervals[i].color.r, intervals[i].color.g, intervals[i].color.b, intervals[i].s, intervals[i].pos);
+                }
+                printf("};\n");
+            }
+            
             command[0] = 0;
         }
 

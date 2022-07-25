@@ -9,7 +9,7 @@ uniform float max_iters;
 uniform double mag;
 uniform dvec2 offset;
 
-unsigned int escape_iters(dvec2 c) {
+precise unsigned int escape_iters(dvec2 c) {
     dvec2 z = dvec2(0.0, 0.0);
     dvec2 z_sq = dvec2(0.0, 0.0);
 
@@ -24,7 +24,7 @@ unsigned int escape_iters(dvec2 c) {
     return i;
 }
 
-void main() {
+precise void main() {
     dvec2 new_coord = (vec2(gl_GlobalInvocationID.xy)/imageSize(img).xy - dvec2(0.5, 0.5)) / mag + dvec2(0.5f, 0.5f);
     dvec2 c = new_coord * (upper_right - bottom_left) + bottom_left + offset;
     unsigned int iters = escape_iters(c);
