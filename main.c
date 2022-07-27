@@ -230,7 +230,7 @@ dd dd_div(dd b, dd a) {
 enum input_mode { MOVE, HUE };
 
 static dd mag = {0.5, 0.0};
-static dd x_offset = {-.5, 0.0}, y_offset = {-.5, 0.0};
+static dd x_offset = {0.0, 0.0}, y_offset = {0.0, 0.0};
 static char regen_set = 1;
 
 static int current_mode = MOVE;
@@ -469,7 +469,7 @@ int main() {
     glUseProgram(compute_prog);
     glUniform2d(glGetUniformLocation(compute_prog, "bottom_left"), -1.0, -1.0);
     glUniform2d(glGetUniformLocation(compute_prog, "upper_right"), 1.0, 1.0);
-    glUniform1f(glGetUniformLocation(compute_prog, "max_iters"), 3000.0f);
+    glUniform1f(glGetUniformLocation(compute_prog, "max_iters"), 1000.0f);
 
     char command[MAX_COMMAND_SIZE + 1];
 
@@ -490,7 +490,6 @@ int main() {
             regen_set = 0;
         }
 
-        
         glUseProgram(render_prog);
 
         if (change_mode) {
@@ -546,7 +545,17 @@ int main() {
                 }
                 printf("};\n");
             }
-            
+            else if (!strcmp(first_tok, "dump_pos")) {
+                printf("{%.16llx%.16llx,%.16llx%.16llx}\n", *((unsigned long long*)&x_offset.x), *((unsigned long long*)&x_offset.y), *((unsigned long long*)&y_offset.x), ((unsigned long long*)&y_offset.y));
+            }
+            else if (!strcmp(first_tok, "set_pos")) {
+                sscanf(strtok(NULL, " "), "{%16llx%16llx,%16llx%16llx}", (unsigned long long*)&x_offset.x, (unsigned long long*)&x_offset.y, (unsigned long long*)&y_offset.x, (unsigned long long*)&y_offset.y);
+                printf("position set.\n");
+                regen_set = 1;
+            }
+
+            // i know it looks bad
+
             command[0] = 0;
         }
 

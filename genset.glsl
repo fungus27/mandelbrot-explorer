@@ -133,8 +133,8 @@ precise void main() {
     dvec2 new_coordy = ds_add(ds_div(ds_set(double(gl_GlobalInvocationID.y)/imageSize(img).y - 0.5), mag), ds_set(0.5));
     //dvec2 cx = ds_add(ds_add(ds_mul(new_coordx , ds_set(upper_right.x) - bottom_left.x) , ds_set(bottom_left.x)) , offsetx);
     //dvec2 cy = ds_add(ds_add(ds_mul(new_coordy , ds_set(upper_right.y) - bottom_left.y) , ds_set(bottom_left.y)) , offsety);
-    dvec2 cx = ds_add(new_coordx, offsetx);
-    dvec2 cy = ds_add(new_coordy, offsety);
+    dvec2 cx = ds_add(new_coordx, ds_add(offsetx, ds_set(-0.5)));
+    dvec2 cy = ds_add(new_coordy, ds_add(offsety, ds_set(-0.5)));
     unsigned int iters = escape_iters(cx, cy);
 
     imageStore(img, ivec2(gl_GlobalInvocationID.xy), uvec4(int(iters/float(max_iters) * 255), 0, 0, 255));
