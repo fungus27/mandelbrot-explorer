@@ -435,7 +435,7 @@ int main() {
         exit(EXIT_FAILURE);
     }
 
-    const unsigned int w = 600, h = 600;
+    const unsigned int w = 320 * 8, h = 320 * 6;
 
     glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
     GLFWwindow* window = glfwCreateWindow(w, h, "dev", NULL, NULL);
@@ -507,11 +507,10 @@ int main() {
     unsigned int render_prog = compile_render_shaders("vert.glsl", "frag.glsl");
     glUseProgram(render_prog);
 
-    const unsigned int work_group_size = 30;
+    const unsigned int work_group_size = 32;
     glUseProgram(compute_prog);
-    glUniform2d(glGetUniformLocation(compute_prog, "bottom_left"), -1.0, -1.0);
-    glUniform2d(glGetUniformLocation(compute_prog, "upper_right"), 1.0, 1.0);
-    glUniform1f(glGetUniformLocation(compute_prog, "max_iters"), 1000.0f);
+    glUniform1ui(glGetUniformLocation(compute_prog, "max_iters"), 500);
+    glUniform1ui(glGetUniformLocation(compute_prog, "antialiasing"), 2);
 
     char command[MAX_COMMAND_SIZE + 1];
 
@@ -523,9 +522,9 @@ int main() {
     double rec_vel = 0.0;
     dd rec_step = {0.0, 0.0};
     unsigned int rec_fps = 30;
-    char rec_filename[MAX_PATH_SIZE];
+    char rec_filename[MAX_PATH_SIZE] = {0};
     char recording = 0;
-    unsigned char screen[w * h * 3];
+    unsigned char *screen = malloc(w * h * 3);
 
     assert(!glGetError());
 
@@ -653,7 +652,7 @@ int main() {
             }
             else if (!strcmp(first_tok, "rec_start")) {
                 AVRational framerate = { rec_fps, 1 };
-                initialize_recorder(&rc, AV_CODEC_ID_H264, 5500000, framerate, w, h, AV_PIX_FMT_YUV420P, rec_filename);
+                initialize_recorder(&rc, AV_CODEC_ID_H265, 15000000, framerate, w, h, AV_PIX_FMT_YUV420P, rec_filename);
                 rec_step = dd_nth_root(dd_set(rec_vel), rec_fps);
                 recording = 1;
             }
@@ -668,5 +667,6 @@ int main() {
     }
     
     free(texture_data);
+    free(screen);
     glfwTerminate();
 }
