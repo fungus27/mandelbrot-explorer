@@ -8,8 +8,11 @@
 #include <GL/glew.h>
 #include <GLFW/glfw3.h>
 
+#include "record.h"
+
 #define MAX_COMMAND_SIZE 512
 #define MAX_INTERVAL_COUNT 100
+#define MAX_PATH_SIZE 1024
 
 unsigned int compile_render_shaders(const char *vert_filepath, const char *frag_filepath) {
     FILE *vert_file = fopen(vert_filepath, "r");
@@ -205,6 +208,11 @@ dd dd_add(dd dsa, dd dsb)
     return dsc;
 }
 
+dd dd_sub(dd dsa, dd dsb) {
+    dd dsb_m = {-dsb.x, -dsb.y};
+    return dd_add(dsa, dsb_m);
+}
+
 dd dd_mul(dd a, dd b)
 {
     dd p;
@@ -225,6 +233,40 @@ dd dd_div(dd b, dd a) {
     double diff = (dd_add(b, a_yn)).x;
     dd prod = dd_two_prod(xn, diff);
     return dd_add(yn, prod);
+}
+
+dd dd_abs(dd a) {
+    if (a.x < 0.0 || (a.x == 0.0 && a.y < 0.0)) {
+        a = (dd){-a.x, -a.y};
+    }
+    return a;
+}
+
+char dd_gt(dd a, dd b) {
+     return (a.x > b.x || (a.x == b.x && a.y > b.y));
+}
+
+char dd_eq(dd a, dd b) {
+    return (a.x == b.x && a.y == b.y);
+}
+
+dd dd_nth_pow(dd a, unsigned int n) {
+    if (!n)
+        return dd_set(1.0);
+    dd t = a;
+    while (--n)
+        t = dd_mul(t, a);
+    return t;
+}
+
+dd dd_nth_root(dd a, unsigned int n) {
+    dd x = {pow(a.x, 1.0/n), 0.0};
+    x = dd_add( x, dd_div( dd_mul( x, dd_sub( dd_set(1.0), dd_mul( a, dd_nth_pow(x, n) ) ) ), dd_set((double)n) ) ); // x = x + (x * (1 - ax^n) ) / n
+    x = dd_add( x, dd_div( dd_mul( x, dd_sub( dd_set(1.0), dd_mul( a, dd_nth_pow(x, n) ) ) ), dd_set((double)n) ) );
+    x = dd_add( x, dd_div( dd_mul( x, dd_sub( dd_set(1.0), dd_mul( a, dd_nth_pow(x, n) ) ) ), dd_set((double)n) ) );
+    x = dd_add( x, dd_div( dd_mul( x, dd_sub( dd_set(1.0), dd_mul( a, dd_nth_pow(x, n) ) ) ), dd_set((double)n) ) );
+    x = dd_add( x, dd_div( dd_mul( x, dd_sub( dd_set(1.0), dd_mul( a, dd_nth_pow(x, n) ) ) ), dd_set((double)n) ) );
+    return dd_abs(dd_div(dd_set(1.0), x));
 }
 
 enum input_mode { MOVE, HUE };
@@ -476,6 +518,15 @@ int main() {
     pthread_t thread_id;
     pthread_create(&thread_id, NULL, get_commands, (void*)command);
 
+    recorder_context rc;
+    dd rec_mag = {0.5, 0.0};
+    double rec_vel = 0.0;
+    dd rec_step = {0.0, 0.0};
+    unsigned int rec_fps = 30;
+    char rec_filename[MAX_PATH_SIZE];
+    char recording = 0;
+    unsigned char screen[w * h * 3];
+
     assert(!glGetError());
 
     while (!glfwWindowShouldClose(window)) {
@@ -501,25 +552,39 @@ int main() {
             glUniform3fv(glGetUniformLocation(render_prog, "hue"), 256, (float*)hue);
             change_hue = 0;
         }
+
         glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
+
+        if (recording) {
+            glReadPixels(0, 0, w, h, GL_RGB, GL_UNSIGNED_BYTE, screen);
+            encode_frame(&rc, screen);
+            if (dd_gt(mag, rec_mag) || dd_eq(mag, rec_mag)) {
+                recording = 0;
+                finalize_recorder(&rc);
+                continue;
+            }
+            mag = dd_mul(mag, rec_step);
+            regen_set = 1;
+        }
         
         if (command[0] != 0) {
+            // TODO: change naming for commands
             char *first_tok = strtok(command, " ");
             if (!strcmp(first_tok, "set_int_pos")) {
                 sscanf(strtok(NULL, " "), "%hhu", &intervals[selected_interval].pos);
-                printf("position set.\n");
+                printf("interval position set.\n");
                 gen_hue(start_color, interval_count, intervals, 256, hue);
                 change_hue = 1;
             }
             else if (!strcmp(first_tok, "set_int_col")) {
                 sscanf(strtok(NULL, " "), "{%f,%f,%f}", &intervals[selected_interval].color.r, &intervals[selected_interval].color.g, &intervals[selected_interval].color.b);
-                printf("color set.\n");
+                printf("interval color set.\n");
                 gen_hue(start_color, interval_count, intervals, 256, hue);
                 change_hue = 1;
             }
             else if (!strcmp(first_tok, "set_int_s")) {
                 sscanf(strtok(NULL, " "), "%f", &intervals[selected_interval].s);
-                printf("s set.\n");
+                printf("interval s set.\n");
                 gen_hue(start_color, interval_count, intervals, 256, hue);
                 change_hue = 1;
             }
@@ -553,7 +618,46 @@ int main() {
                 printf("position set.\n");
                 regen_set = 1;
             }
-
+            else if (!strcmp(first_tok, "dump_mag")) {
+                printf("%.16llx%.16llx\n", *((unsigned long long*)&mag.x), *((unsigned long long*)&mag.y));
+            }
+            else if (!strcmp(first_tok, "set_mag")) {
+                sscanf(strtok(NULL, " "), "%16llx%16llx", (unsigned long long*)&mag.x, (unsigned long long*)&mag.y);
+                printf("mag set.\n");
+                regen_set = 1;
+            }
+            else if (!strcmp(first_tok, "rec_set_mag")) {
+                sscanf(strtok(NULL, " "), "%16llx%16llx", (unsigned long long*)&rec_mag.x, (unsigned long long*)&rec_mag.y);
+                printf("recording mag set.\n");
+            }
+            else if (!strcmp(first_tok, "rec_set_vel")) {
+                sscanf(strtok(NULL, " "), "%lf", &rec_vel);
+                printf("recording vel set.\n", rec_vel);
+            }
+            else if (!strcmp(first_tok, "rec_set_fps")) {
+                sscanf(strtok(NULL, " "), "%u", &rec_fps);
+                printf("recording fps set.\n");
+            }
+            else if (!strcmp(first_tok, "rec_set_filename")) {
+                sscanf(strtok(NULL, " "), "%s", rec_filename);
+                printf("recording filename set.\n");
+            }
+            else if (!strcmp(first_tok, "dump_rec")) {
+                printf("RECORDING INFO:\n");
+                printf("\tend zoom: %.16llx%.16llx\n", *((unsigned long long*)&rec_mag.x), *((unsigned long long*)&rec_mag.y));
+                printf("\tvel: %f\n", rec_vel);
+                printf("\tfps: %u\n", rec_fps);
+                printf("\tfilename: %s\n", rec_filename);
+                unsigned int t = ceil(rec_fps * log(rec_mag.x/mag.x)/log(rec_vel));
+                printf("estimated time (about %u frames): %f\n", t, t/(float)rec_fps);
+            }
+            else if (!strcmp(first_tok, "rec_start")) {
+                AVRational framerate = { rec_fps, 1 };
+                initialize_recorder(&rc, AV_CODEC_ID_H264, 5500000, framerate, w, h, AV_PIX_FMT_YUV420P, rec_filename);
+                rec_step = dd_nth_root(dd_set(rec_vel), rec_fps);
+                recording = 1;
+            }
+            
             // i know it looks bad
 
             command[0] = 0;
