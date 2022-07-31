@@ -274,7 +274,7 @@ dd dd_nth_root(dd a, unsigned int n) {
     return dd_abs(dd_div(dd_set(1.0), x));
 }
 
-enum input_mode { MOVE, HUE };
+enum input_mode { MOVE, HUE, RECORD };
 
 static dd mag = {0.5, 0.0};
 static dd x_offset = {0.0, 0.0}, y_offset = {0.0, 0.0};
@@ -285,7 +285,7 @@ static char change_mode = 1;
 
 static color hue[256];
 static char change_hue = 1;
-    
+
 static color start_color = {0.0f, 0.0f, 0.25f};
 static unsigned int selected_interval = 0;
 static unsigned int interval_count = 4;
@@ -295,6 +295,10 @@ static interval intervals[MAX_INTERVAL_COUNT] = {
         { {0.701000f, 0.094000f, 0.094000f} , 3.899998f , 217},
         { {0.000000f, 0.000000f, 0.000000f} , 2.400000f , 255},
 };
+
+
+static char recording = 0;
+static char finalize_rec = 0;
 
 void scroll_callback(GLFWwindow *window, double xoffset, double yoffset) {
     if (yoffset > 0.0f)
@@ -350,6 +354,10 @@ void key_callback(GLFWwindow* window, int key, int scancode, int action, int mod
         // mode changing
         switch (key) {
             case GLFW_KEY_H:
+                if (current_mode == RECORD) {
+                    printf("user in RECORD mode. cannot change modes. press space to pause recording.\n");
+                    break;
+                }
                 current_mode = current_mode == MOVE ? HUE : MOVE;
                 printf("changed mode to %s.\n", current_mode == MOVE ? "MOVE" : "HUE");
                 change_mode = 1;
@@ -428,6 +436,23 @@ void key_callback(GLFWwindow* window, int key, int scancode, int action, int mod
             change_hue = 1;
             //printf("selected interval: {{%f, %f, %f}, %f, %u}\n", intervals[selected_interval].color.r, intervals[selected_interval].color.g, intervals[selected_interval].color.b, intervals[selected_interval].s, intervals[selected_interval].pos);
         }
+        else if (current_mode == RECORD) {
+            switch (key) {
+                case GLFW_KEY_SPACE:
+                    if (recording)
+                        printf("paused recording. to resume press space again. to finalize recording press f.\n");
+                    else
+                        printf("resumed recording.\n");
+                    recording = !recording;
+                    break;
+                case GLFW_KEY_F:
+                    if (!recording) {
+                        finalize_rec = 1;
+                        printf("finalizing recording.\n");
+                    }
+                    break;
+            }
+        }
 
     }
 }
@@ -440,8 +465,8 @@ int main() {
         exit(EXIT_FAILURE);
     }
 
-    //const unsigned int w = 320 * 7, h = 320 * 7;
-    const unsigned int w = 320, h = 320;
+    const unsigned int w = 320 * 7, h = 320 * 7;
+    //const unsigned int w = 320, h = 320;
 
     glfwSetErrorCallback(error_callback);
     glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
@@ -534,11 +559,9 @@ int main() {
     unsigned int rec_progress = 0;
     unsigned int rec_est = 0;
     char rec_filename[MAX_PATH_SIZE] = {0};
-    char recording = 0;
     unsigned char *screen = malloc(w * h * 3);
 
     assert(!glGetError());
-    assert(sizeof(unsigned long long) == sizeof(double));
 
     while (!glfwWindowShouldClose(window)) {
         glClear(GL_COLOR_BUFFER_BIT);
@@ -573,10 +596,13 @@ int main() {
                 printf("about %u%% done. %u/%u\n", (rec_progress*100)/rec_est, rec_progress, rec_est);
             glReadPixels(0, 0, w, h, GL_RGB, GL_UNSIGNED_BYTE, screen);
             encode_frame(&rc, screen);
-            if (dd_gt(mag, rec_mag) || dd_eq(mag, rec_mag)) {
-                recording = 0;
+            if (dd_gt(mag, rec_mag) || dd_eq(mag, rec_mag) || finalize_rec) {
                 finalize_recorder(&rc);
+                recording = 0;
                 rec_progress = 0;
+                finalize_rec = 0;
+                current_mode = MOVE;
+                printf("finished recording. current mode: MOVE\n");
                 continue;
             }
             mag = dd_mul(mag, rec_step);
@@ -692,7 +718,9 @@ int main() {
                 initialize_recorder(&rc, AV_CODEC_ID_H265, rec_bitrate, framerate, w, h, AV_PIX_FMT_YUV420P, rec_filename);
                 rec_est = ceil(rec_fps * log(rec_mag.x/mag.x)/log(rec_vel));
                 rec_step = dd_nth_root(dd_set(rec_vel), rec_fps);
-                printf("step: %f. estimated numer of frames: %u\n\n\n", rec_step.x, rec_est);
+                printf("filename: %s\n", rec_filename);
+                printf("\nstep: %f. estimated numer of frames: %u\n\nto stop the recording press space.\n\n", rec_step.x, rec_est);
+                current_mode = RECORD;
                 recording = 1;
             }
             else if (!strcmp(first_tok, "save")) {

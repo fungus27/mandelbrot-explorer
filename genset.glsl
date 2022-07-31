@@ -52,10 +52,10 @@ dvec2 Split64(double d)
 }
 
 precise dvec2 twoProd(precise double a, precise double b) {
-    dvec2 p;
+    precise dvec2 p;
     p.x = a * b;
-    dvec2 aS = Split64(a);
-    dvec2 bS = Split64(b);
+    precise dvec2 aS = Split64(a);
+    precise dvec2 bS = Split64(b);
     p.y = (aS.x * bS.x - p.x) + aS.x * bS.y + aS.y * bS.x + aS.y * bS.y;
     return p;
 }
