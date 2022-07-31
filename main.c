@@ -699,7 +699,7 @@ int main() {
                 char settings_path[MAX_PATH_SIZE];
                 sscanf(strtok(NULL, " "), "%s", settings_path);
                 FILE *s_file = fopen(settings_path, "w");
-                fprintf(s_file, "set_pos {%.16llx%.16llx,%.16llx%.16llx}\n", *((unsigned long long*)&x_offset.x), *((unsigned long long*)&x_offset.y), *((unsigned long long*)&y_offset.x), ((unsigned long long*)&y_offset.y));
+                fprintf(s_file, "set_pos {%.16llx%.16llx,%.16llx%.16llx}\n", *((unsigned long long*)&x_offset.x), *((unsigned long long*)&x_offset.y), *((unsigned long long*)&y_offset.x), *((unsigned long long*)&y_offset.y));
                 fprintf(s_file, "set_mag %.16llx%.16llx\n", *((unsigned long long*)&mag.x), *((unsigned long long*)&mag.y));
                 fprintf(s_file, "set_iters %u\n", max_iters);
                 fprintf(s_file, "rec_set_mag %.16llx%.16llx\n", *((unsigned long long*)&rec_mag.x), *((unsigned long long*)&rec_mag.y));
