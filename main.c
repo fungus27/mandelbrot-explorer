@@ -14,6 +14,11 @@
 #define MAX_INTERVAL_COUNT 100
 #define MAX_PATH_SIZE 1024
 
+void error_callback(int error, const char* description) {
+    fprintf(stderr, "glfw error: %s\n", description);
+    exit(EXIT_FAILURE);
+}
+
 unsigned int compile_render_shaders(const char *vert_filepath, const char *frag_filepath) {
     FILE *vert_file = fopen(vert_filepath, "r");
     if (!vert_file) {
@@ -260,7 +265,7 @@ dd dd_nth_pow(dd a, unsigned int n) {
 }
 
 dd dd_nth_root(dd a, unsigned int n) {
-    dd x = {pow(a.x, 1.0/n), 0.0};
+    dd x = {1.0/pow(a.x, 1.0/n), 0.0};
     x = dd_add( x, dd_div( dd_mul( x, dd_sub( dd_set(1.0), dd_mul( a, dd_nth_pow(x, n) ) ) ), dd_set((double)n) ) ); // x = x + (x * (1 - ax^n) ) / n
     x = dd_add( x, dd_div( dd_mul( x, dd_sub( dd_set(1.0), dd_mul( a, dd_nth_pow(x, n) ) ) ), dd_set((double)n) ) );
     x = dd_add( x, dd_div( dd_mul( x, dd_sub( dd_set(1.0), dd_mul( a, dd_nth_pow(x, n) ) ) ), dd_set((double)n) ) );
@@ -435,8 +440,10 @@ int main() {
         exit(EXIT_FAILURE);
     }
 
-    const unsigned int w = 320 * 8, h = 320 * 6;
+    //const unsigned int w = 320 * 7, h = 320 * 7;
+    const unsigned int w = 320, h = 320;
 
+    glfwSetErrorCallback(error_callback);
     glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
     GLFWwindow* window = glfwCreateWindow(w, h, "dev", NULL, NULL);
     glfwMakeContextCurrent(window);
@@ -508,11 +515,12 @@ int main() {
     glUseProgram(render_prog);
 
     const unsigned int work_group_size = 32;
-    glUseProgram(compute_prog);
-    glUniform1ui(glGetUniformLocation(compute_prog, "max_iters"), 500);
-    glUniform1ui(glGetUniformLocation(compute_prog, "antialiasing"), 2);
+    unsigned int antialiasing = 0;
+    unsigned int max_iters = 1000;
 
     char command[MAX_COMMAND_SIZE + 1];
+    char load_commands = 0;
+    FILE *s_file;
 
     pthread_t thread_id;
     pthread_create(&thread_id, NULL, get_commands, (void*)command);
@@ -522,11 +530,15 @@ int main() {
     double rec_vel = 0.0;
     dd rec_step = {0.0, 0.0};
     unsigned int rec_fps = 30;
+    unsigned int rec_bitrate = 100000;
+    unsigned int rec_progress = 0;
+    unsigned int rec_est = 0;
     char rec_filename[MAX_PATH_SIZE] = {0};
     char recording = 0;
     unsigned char *screen = malloc(w * h * 3);
 
     assert(!glGetError());
+    assert(sizeof(unsigned long long) == sizeof(double));
 
     while (!glfwWindowShouldClose(window)) {
         glClear(GL_COLOR_BUFFER_BIT);
@@ -536,7 +548,9 @@ int main() {
             glUniform2d(glGetUniformLocation(compute_prog, "mag"), mag.x, mag.y);
             glUniform2d(glGetUniformLocation(compute_prog, "offsetx"), x_offset.x, x_offset.y);
             glUniform2d(glGetUniformLocation(compute_prog, "offsety"), y_offset.x, y_offset.y);
-            glDispatchCompute(w / work_group_size, h / work_group_size, 1);
+            glUniform1ui(glGetUniformLocation(compute_prog, "antialiasing"), antialiasing);
+            glUniform1ui(glGetUniformLocation(compute_prog, "max_iters"), max_iters);
+            glDispatchCompute(w/ work_group_size, h / work_group_size, 1);
             regen_set = 0;
         }
 
@@ -555,15 +569,19 @@ int main() {
         glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
 
         if (recording) {
+            if (rec_progress % 20 == 0)
+                printf("about %u%% done. %u/%u\n", (rec_progress*100)/rec_est, rec_progress, rec_est);
             glReadPixels(0, 0, w, h, GL_RGB, GL_UNSIGNED_BYTE, screen);
             encode_frame(&rc, screen);
             if (dd_gt(mag, rec_mag) || dd_eq(mag, rec_mag)) {
                 recording = 0;
                 finalize_recorder(&rc);
+                rec_progress = 0;
                 continue;
             }
             mag = dd_mul(mag, rec_step);
             regen_set = 1;
+            rec_progress++;
         }
         
         if (command[0] != 0) {
@@ -609,21 +627,33 @@ int main() {
                 }
                 printf("};\n");
             }
-            else if (!strcmp(first_tok, "dump_pos")) {
-                printf("{%.16llx%.16llx,%.16llx%.16llx}\n", *((unsigned long long*)&x_offset.x), *((unsigned long long*)&x_offset.y), *((unsigned long long*)&y_offset.x), ((unsigned long long*)&y_offset.y));
-            }
             else if (!strcmp(first_tok, "set_pos")) {
                 sscanf(strtok(NULL, " "), "{%16llx%16llx,%16llx%16llx}", (unsigned long long*)&x_offset.x, (unsigned long long*)&x_offset.y, (unsigned long long*)&y_offset.x, (unsigned long long*)&y_offset.y);
                 printf("position set.\n");
                 regen_set = 1;
             }
-            else if (!strcmp(first_tok, "dump_mag")) {
-                printf("%.16llx%.16llx\n", *((unsigned long long*)&mag.x), *((unsigned long long*)&mag.y));
-            }
             else if (!strcmp(first_tok, "set_mag")) {
                 sscanf(strtok(NULL, " "), "%16llx%16llx", (unsigned long long*)&mag.x, (unsigned long long*)&mag.y);
                 printf("mag set.\n");
                 regen_set = 1;
+            }
+            else if (!strcmp(first_tok, "set_iters")) {
+                sscanf(strtok(NULL, " "), "%u", &max_iters);
+                printf("iters set.\n");
+                regen_set = 1;
+            }
+            else if (!strcmp(first_tok, "set_aa")) {
+                sscanf(strtok(NULL, " "), "%u", &antialiasing);
+                printf("aa set.\n");
+                regen_set = 1;
+            }
+            else if (!strcmp(first_tok, "dump_ren")) {
+                printf("RENDER INFO:\n");
+                printf("\tmag: %.16llx%.16llx\n", *((unsigned long long*)&mag.x), *((unsigned long long*)&mag.y));
+                printf("\tpos: {%.16llx%.16llx,%.16llx%.16llx}\n", *((unsigned long long*)&x_offset.x), *((unsigned long long*)&x_offset.y), *((unsigned long long*)&y_offset.x), *((unsigned long long*)&y_offset.y));
+                printf("\titers: %u\n", max_iters);
+                printf("\taa: %u\n", antialiasing);
+                printf("mag approx: %f pos approx: %f, %f\n", mag.x, x_offset.x, y_offset.x);
             }
             else if (!strcmp(first_tok, "rec_set_mag")) {
                 sscanf(strtok(NULL, " "), "%16llx%16llx", (unsigned long long*)&rec_mag.x, (unsigned long long*)&rec_mag.y);
@@ -641,32 +671,76 @@ int main() {
                 sscanf(strtok(NULL, " "), "%s", rec_filename);
                 printf("recording filename set.\n");
             }
+            else if (!strcmp(first_tok, "rec_set_bitrate")) {
+                sscanf(strtok(NULL, " "), "%u", &rec_bitrate);
+                printf("recording bitrate set.\n");
+            }
             else if (!strcmp(first_tok, "dump_rec")) {
                 printf("RECORDING INFO:\n");
                 printf("\tend zoom: %.16llx%.16llx\n", *((unsigned long long*)&rec_mag.x), *((unsigned long long*)&rec_mag.y));
                 printf("\tvel: %f\n", rec_vel);
                 printf("\tfps: %u\n", rec_fps);
+                printf("\tbitrate: %u\n", rec_bitrate);
                 printf("\tfilename: %s\n", rec_filename);
                 unsigned int t = ceil(rec_fps * log(rec_mag.x/mag.x)/log(rec_vel));
                 printf("estimated time (about %u frames): %f\n", t, t/(float)rec_fps);
+                printf("mag approx: %f\n", rec_mag.x);
             }
             else if (!strcmp(first_tok, "rec_start")) {
                 AVRational framerate = { rec_fps, 1 };
-                initialize_recorder(&rc, AV_CODEC_ID_H265, 15000000, framerate, w, h, AV_PIX_FMT_YUV420P, rec_filename);
+                printf("\n\nSTARTING TO RECORD\n---------------\ncodec info:\n");
+                initialize_recorder(&rc, AV_CODEC_ID_H265, rec_bitrate, framerate, w, h, AV_PIX_FMT_YUV420P, rec_filename);
+                rec_est = ceil(rec_fps * log(rec_mag.x/mag.x)/log(rec_vel));
                 rec_step = dd_nth_root(dd_set(rec_vel), rec_fps);
+                printf("step: %f. estimated numer of frames: %u\n\n\n", rec_step.x, rec_est);
                 recording = 1;
+            }
+            else if (!strcmp(first_tok, "save")) {
+                char settings_path[MAX_PATH_SIZE];
+                sscanf(strtok(NULL, " "), "%s", settings_path);
+                FILE *s_file = fopen(settings_path, "w");
+                fprintf(s_file, "set_pos {%.16llx%.16llx,%.16llx%.16llx}\n", *((unsigned long long*)&x_offset.x), *((unsigned long long*)&x_offset.y), *((unsigned long long*)&y_offset.x), ((unsigned long long*)&y_offset.y));
+                fprintf(s_file, "set_mag %.16llx%.16llx\n", *((unsigned long long*)&mag.x), *((unsigned long long*)&mag.y));
+                fprintf(s_file, "set_iters %u\n", max_iters);
+                fprintf(s_file, "rec_set_mag %.16llx%.16llx\n", *((unsigned long long*)&rec_mag.x), *((unsigned long long*)&rec_mag.y));
+                fprintf(s_file, "rec_set_vel %f\n", rec_vel);
+                fprintf(s_file, "rec_set_fps %u\n", rec_fps);
+                fprintf(s_file, "rec_set_bitrate %u\n", rec_bitrate);
+                fprintf(s_file, "rec_set_filename %s\n", rec_filename);
+                fclose(s_file);
+                printf("saved settings.\n");
+            }
+            else if (!strcmp(first_tok, "load")) {
+                char settings_path[MAX_PATH_SIZE];
+                sscanf(strtok(NULL, " "), "%s", settings_path);
+                s_file = fopen(settings_path, "r");
+                load_commands = 1;
             }
             
             // i know it looks bad
 
             command[0] = 0;
+
+            if (load_commands) {
+                long unsigned int size;
+                char *line = NULL;
+                if(getline(&line, &size, s_file) < 0) {
+                    load_commands = 0;
+                    fclose(s_file);
+                }
+                else {
+                    strcpy(command, line);
+                    free(line);
+                }
+            }
         }
 
         glfwSwapBuffers(window);
         glfwPollEvents();
     }
-    
     free(texture_data);
     free(screen);
+    pthread_cancel(thread_id);
+    assert(!glGetError());
     glfwTerminate();
 }
