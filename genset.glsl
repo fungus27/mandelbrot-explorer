@@ -10,6 +10,9 @@ uniform dvec2 offsety;
 
 uniform unsigned int antialiasing;
 
+const double SPLITTER = (1 << 29) + 1;
+
+
 precise dvec2 ds_set(double a)
 {
     precise dvec2 z;
@@ -42,7 +45,6 @@ precise dvec2 quick_two_sum(precise double a, precise double b)
 
 dvec2 Split64(double d)
 {
-    const double SPLITTER = (1 << 29) + 1;
     double t = d * SPLITTER;
     dvec2 result;
     result.x = t - (t - d);
@@ -86,14 +88,12 @@ precise unsigned int escape_iters(dvec2 cx, dvec2 cy, unsigned int m_iters) {
     dvec2 z_sqy = dvec2(0.0, 0.0);
 
     unsigned int i;
-    for (i = 0; i < m_iters; i++) {
-        zy = ds_add(ds_mul(ds_mul(ds_set(2.0), zx), zy), cy);
+    for (i = 0; i < m_iters && z_sqx.x + z_sqy.x < 4.0; i++) {
+        zy = ds_add(ds_mul(ds_add(zx, zx), zy), cy);
         zx = ds_add(ds_add(z_sqx, -z_sqy), cx);
 
         z_sqx = ds_mul(zx, zx);
         z_sqy = ds_mul(zy, zy);
-        if (ds_add(z_sqx, z_sqy).x > 4.0)
-            return i;
     }
     return i;
 }

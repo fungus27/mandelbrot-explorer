@@ -467,6 +467,7 @@ int main() {
 
     const unsigned int w = 320 * 7, h = 320 * 7;
     //const unsigned int w = 320, h = 320;
+    //const unsigned int w = 1280, h = 1280;
 
     glfwSetErrorCallback(error_callback);
     glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
@@ -541,7 +542,7 @@ int main() {
 
     const unsigned int work_group_size = 32;
     unsigned int antialiasing = 0;
-    unsigned int max_iters = 1000;
+    unsigned int max_iters = 1300;
 
     char command[MAX_COMMAND_SIZE + 1];
     char load_commands = 0;
@@ -573,7 +574,8 @@ int main() {
             glUniform2d(glGetUniformLocation(compute_prog, "offsety"), y_offset.x, y_offset.y);
             glUniform1ui(glGetUniformLocation(compute_prog, "antialiasing"), antialiasing);
             glUniform1ui(glGetUniformLocation(compute_prog, "max_iters"), max_iters);
-            glDispatchCompute(w/ work_group_size, h / work_group_size, 1);
+            glDispatchCompute(w / work_group_size, h / work_group_size, 1);
+            glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT);
             regen_set = 0;
         }
 
@@ -762,7 +764,6 @@ int main() {
                 }
             }
         }
-
         glfwSwapBuffers(window);
         glfwPollEvents();
     }

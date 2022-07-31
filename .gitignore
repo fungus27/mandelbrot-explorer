@@ -2,3 +2,4 @@ main
 *.o
 *.sh
 video/
+settings/
